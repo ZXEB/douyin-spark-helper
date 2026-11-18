@@ -113,9 +113,9 @@ const encodeGzipBase64 = async (str) => {
 
 // 登录
 export const login = async (cookie) => {
-  const jsonStr = JSON.stringify(cookie)
+  const content = typeof cookie === 'string' ? cookie.trim() : JSON.stringify(cookie)
   const encoder = new TextEncoder()
-  const inputData = encoder.encode(jsonStr)
+  const inputData = encoder.encode(content)
   const cs = new CompressionStream('gzip')
   const writer = cs.writable.getWriter()
   writer.write(inputData)
@@ -181,5 +181,14 @@ export const forceLogin = () => api.get('/Api/LoginDebug')
 
 // 获取项目启动时间
 export const getHome = () => api.get('/Home')
+
+// 获取安全验证状态
+export const getSecurityStatus = () => api.get('/Api/SecurityStatus')
+
+// 将浏览器窗口置前
+export const focusBrowser = () => api.get('/Api/FocusBrowser')
+
+// 恢复自动化（用户完成安全验证后调用）
+export const resumeAutomation = () => api.get('/Api/ResumeAutomation')
 
 export default api

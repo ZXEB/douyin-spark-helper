@@ -1,5 +1,27 @@
 <template>
   <div class="settings-container">
+    <!-- 安全验证提示 -->
+    <el-alert
+      v-if="securityChallenge"
+      title="检测到抖音安全验证"
+      description="抖音触发了安全验证（滑块/短信/扫脸），请在浏览器窗口中手动完成验证，完成后点击下方按钮恢复自动化。"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #default>
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+          <el-button type="primary" size="small" @click="handleFocusBrowser" :loading="focusLoading">
+            打开浏览器窗口
+          </el-button>
+          <el-button type="success" size="small" @click="handleResumeAutomation" :loading="resumeLoading">
+            已完成验证，恢复自动化
+          </el-button>
+        </div>
+      </template>
+    </el-alert>
+
     <el-card>
       <template #header>
         <div class="card-header">
@@ -121,11 +143,11 @@
     </el-dialog>
 
     <!-- 二维码弹窗 -->
-    <el-dialog v-model="qrDialogVisible" title="抖音扫码登录" width="350px" destroy-on-close>
+    <el-dialog v-model="qrDialogVisible" title="抖音扫码登录" width="440px" destroy-on-close>
       <div class="qrcode-container">
         <div v-if="qrcodeUrl" class="qrcode-wrapper">
           <img :src="qrcodeUrl" alt="登录二维码" class="qrcode-img" />
-          <p class="qrcode-hint">请使用抖音App扫码登录</p>
+          <p class="qrcode-hint">请使用抖音App扫码登录，并在手机端点击确认</p>
         </div>
         <div v-else-if="loading" class="loading-wrapper">
           <el-icon class="is-loading"><Loading /></el-icon>
@@ -135,12 +157,28 @@
           <p>获取二维码失败，请重试</p>
         </div>
       </div>
-      <div class="qrcode-actions">
+
+      <!-- 扫码调试实时画面 -->
+      <div v-if="qrScreenshotUrl" style="margin: 12px 0; text-align: center; background: rgba(0,0,0,0.03); padding: 8px; border-radius: 8px;">
+        <div style="font-size: 12px; color: #606266; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+          <span>🖥️ 浏览器实时状态 (调试):</span>
+          <el-link type="primary" :underline="false" style="font-size: 12px;" @click="screenshotPreviewVisible = true; screenshotUrl = qrScreenshotUrl">查看高清大图</el-link>
+        </div>
+        <img :src="qrScreenshotUrl" style="max-width: 100%; max-height: 180px; border-radius: 6px; border: 1px solid #dcdfe6; cursor: pointer; object-fit: contain;" @click="screenshotPreviewVisible = true; screenshotUrl = qrScreenshotUrl" />
+      </div>
+
+      <div class="qrcode-actions" style="margin-top: 12px; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;">
         <el-button :icon="Refresh" @click="handleRefreshCode" :loading="refreshLoading" size="small">
-          刷新验证码
+          刷新二维码
         </el-button>
-        <el-button :icon="View" @click="handleCheckLogin" :loading="checkLoading" size="small">
+        <el-button type="primary" :icon="View" @click="handleCheckLogin" :loading="checkLoading" size="small">
           获取登录状态
+        </el-button>
+        <el-button :icon="Picture" @click="handleFetchQrScreenshot" :loading="qrScreenshotLoading" size="small">
+          实时截图
+        </el-button>
+        <el-button :icon="Message" @click="qrDialogVisible = false; phoneDialogVisible = true" size="small">
+          验证码登录
         </el-button>
       </div>
     </el-dialog>
@@ -228,7 +266,7 @@
 import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Key, Refresh, View, Loading, Edit, Lock, Document, SwitchButton, Picture, Message, WarnTriangleFilled } from '@element-plus/icons-vue'
-import { getInitStatus, getLoginStatus, initBrowser, getLoginPng, login, getUsername, changePassword, getLastLoginIP, getFriendsList, getCooker, logout, pnglogin, getScrlk, dieLogin, sendVerifyCode, submitVerifyCode, forceLogin, getBrowserType, setBrowserType } from '../api/douyin'
+import { getInitStatus, getLoginStatus, initBrowser, getLoginPng, login, getUsername, changePassword, getLastLoginIP, getFriendsList, getCooker, logout, pnglogin, getScrlk, dieLogin, sendVerifyCode, submitVerifyCode, forceLogin, getBrowserType, setBrowserType, getSecurityStatus, focusBrowser, resumeAutomation } from '../api/douyin'
 import { loginStatus, hasLoaded, setLoginStatus, setFriendsList } from '../stores/browser'
 
 const loginLoading = ref(false)
@@ -273,6 +311,52 @@ const phoneForm = ref({
   phone: '',
   code: ''
 })
+
+const securityChallenge = ref(false)
+const focusLoading = ref(false)
+const resumeLoading = ref(false)
+
+const checkSecurityStatus = async () => {
+  try {
+    const res = await getSecurityStatus()
+    if (res.data && res.data.active !== undefined) {
+      securityChallenge.value = res.data.active
+    }
+  } catch (error) {
+    // 静默处理
+  }
+}
+
+const handleFocusBrowser = async () => {
+  focusLoading.value = true
+  try {
+    await focusBrowser()
+    ElMessage.success('浏览器窗口已置前，请手动完成安全验证')
+  } catch (error) {
+    ElMessage.error('无法打开浏览器窗口')
+  } finally {
+    focusLoading.value = false
+  }
+}
+
+const handleResumeAutomation = async () => {
+  resumeLoading.value = true
+  try {
+    const res = await resumeAutomation()
+    securityChallenge.value = false
+    if (res.logged_in) {
+      loginStatus.value = true
+      setLoginStatus(true)
+      ElMessage.success('验证完成，已恢复自动化')
+    } else {
+      ElMessage.info('已恢复自动化，但登录状态未确认')
+    }
+  } catch (error) {
+    ElMessage.error('恢复自动化失败')
+  } finally {
+    resumeLoading.value = false
+  }
+}
 
 const fetchLastLoginIP = async () => {
   try {
@@ -347,9 +431,30 @@ const handleRefreshStatus = async () => {
     localStorage.removeItem('douyin_username_loaded')
     await checkLoginStatus()
     await fetchLastLoginIP()
+    await checkSecurityStatus()
     ElMessage.success(loginStatus.value ? '已登录' : '未登录')
   } finally {
     refreshStatusLoading.value = false
+  }
+}
+
+const qrScreenshotUrl = ref('')
+const qrScreenshotLoading = ref(false)
+
+const handleFetchQrScreenshot = async () => {
+  qrScreenshotLoading.value = true
+  try {
+    const res = await getScrlk()
+    if (res.data) {
+      qrScreenshotUrl.value = 'data:image/png;base64,' + res.data
+      ElMessage.success('已刷新浏览器实时画面')
+    } else {
+      ElMessage.warning('未获取到截图数据')
+    }
+  } catch (e) {
+    ElMessage.error('获取实时截图失败')
+  } finally {
+    qrScreenshotLoading.value = false
   }
 }
 
@@ -357,12 +462,14 @@ const handleCheckLogin = async () => {
   checkLoading.value = true
   try {
     const res = await pnglogin()
+    if (res.screenshot) {
+      qrScreenshotUrl.value = 'data:image/png;base64,' + res.screenshot
+    }
     if (res.code == 202 || res.code == '202' || res.data === 'two_factor_required') {
       loginStatus.value = false
       setLoginStatus(false)
-      qrDialogVisible.value = false
-      phoneDialogVisible.value = true
-      ElMessage.warning('扫码已通过，请继续完成手机号验证码二次认证')
+      securityChallenge.value = true
+      ElMessage.warning('检测到抖音安全二次验证，请在浏览器窗口中手动完成验证')
       return
     }
     loginStatus.value = res.code == 200 || res.code == '200'
@@ -378,10 +485,10 @@ const handleCheckLogin = async () => {
       // 登录成功后请求好友列表
       await fetchFriendsList()
     } else {
-      ElMessage.warning('未登录，请继续扫码')
+      ElMessage.warning(res.message || '未确认登录，请查看下方实时状态')
     }
   } catch (error) {
-    ElMessage.error('扫码登录失败，请重试')
+    ElMessage.error('扫码状态检查失败，请重试')
   } finally {
     checkLoading.value = false
   }
@@ -641,6 +748,13 @@ const handleLogin = async () => {
   try {
     // 先初始化浏览器
     await initBrowser()
+    // 刷新登录状态：已登录时页面上不存在二维码
+    await checkLoginStatus()
+    if (loginStatus.value) {
+      ElMessage.warning('当前浏览器已登录抖音账号，如需切换账号请先「强制退出登录」')
+      qrDialogVisible.value = false
+      return
+    }
     // 获取二维码
     const res = await getLoginPng()
     if (res.data) {
@@ -667,6 +781,7 @@ onMounted(async () => {
     await fetchLastLoginIP()
     localStorage.setItem('douyin_settings_loaded', '1')
   }
+  await checkSecurityStatus()
 })
 
 onActivated(async () => {
