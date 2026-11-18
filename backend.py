@@ -227,8 +227,14 @@ class Douyin:
             let fire = '';
             const streakEl = item.querySelector('[class*="commonStreakstreakContainer"], [class*="Streak"]');
             if (streakEl) {
-                const numMatch = streakEl.innerText.match(/\\d+/);
-                if (numMatch) fire = numMatch[0];
+                const streakText = streakEl.innerText.replace(/\\s+/g, '');
+                if (streakText.includes('重燃中')) {
+                    // 火花熄灭重燃期间显示的是进度（如 1/3）而非天数，保留原文
+                    fire = streakText;
+                } else {
+                    const numMatch = streakText.match(/\\d+/);
+                    if (numMatch) fire = numMatch[0];
+                }
             }
             // 兜底：从标题旁标签提取，但只接受纯数字（可选"天"后缀），避免把日期/时间当成火花
             if (!fire) {
@@ -312,6 +318,16 @@ class Douyin:
         item.setAttribute('data-spark-target', '1');
         return { found: true, count: items.length, title: titleOf(item) };
         }"""
+        js_reset = """() => {
+        const containers = Array.from(document.querySelectorAll('div')).filter(d => {
+            const s = getComputedStyle(d);
+            return (s.overflowY === 'auto' || s.overflowY === 'scroll') &&
+                   d.scrollHeight > d.clientHeight + 10 &&
+                   d.querySelector('div[data-e2e="conversation-item"]');
+        });
+        if (containers.length) containers[containers.length - 1].scrollTop = 0;
+        return containers.length;
+        }"""
         js_scroll = """() => {
         const containers = Array.from(document.querySelectorAll('div')).filter(d => {
             const s = getComputedStyle(d);
@@ -325,6 +341,23 @@ class Douyin:
         c.scrollTop = before + 420;
         return { scrolled: c.scrollTop > before };
         }"""
+
+        # 会话列表在页面加载后异步渲染，先等待会话项出现
+        for _ in range(25):
+            try:
+                count = self.page.evaluate("() => document.querySelectorAll('div[data-e2e=\"conversation-item\"]').length")
+            except Exception:
+                count = 0
+            if count:
+                break
+            time.sleep(0.4)
+
+        # 列表可能停留在上次滚动的位置，虚拟化会卸载顶部会话，先回到顶部
+        try:
+            self.page.evaluate(js_reset)
+            time.sleep(0.4)
+        except Exception:
+            pass
 
         found = False
         for _ in range(20):
