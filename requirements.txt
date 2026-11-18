@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-selenium
+playwright
 schedule
 requests
 python-multipart
